@@ -99,9 +99,9 @@ if [ \$# -ne 1 ]; then
   exit 1
 fi
 PORT=\$1
-# Limiter le débit de Zmap à 10 000 paquets/sec pour éviter de saturer le réseau/CPU
-# et de faire crash le SSH
-screen -dmS scanner_\$PORT bash -c "zmap -p\$PORT -r 10000 -q | ./fiber \$PORT"
+# Limiter le débit de Zmap à 100 Mbps pour éviter de saturer le réseau
+# L'option -B 100M fixe la bande passante maximale à 100 megabits par seconde
+screen -dmS scanner_\$PORT bash -c "zmap -p\$PORT -B 100M -q | ./fiber \$PORT"
 EOL
         chmod +x start_scanner.sh
     fi

