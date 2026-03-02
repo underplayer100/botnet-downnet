@@ -94,7 +94,14 @@ EOL
     if [ ! -f "start_scanner.sh" ]; then
         cat > start_scanner.sh << EOL
 #!/bin/bash
-screen -dmS scanner_\$1 bash -c "zmap -p\$1 -q | ./fiber \$1"
+if [ \$# -ne 1 ]; then
+  echo "Usage: \$0 <port>"
+  exit 1
+fi
+PORT=\$1
+# Limiter le débit de Zmap à 10 000 paquets/sec pour éviter de saturer le réseau/CPU
+# et de faire crash le SSH
+screen -dmS scanner_\$PORT bash -c "zmap -p\$PORT -r 10000 -q | ./fiber \$PORT"
 EOL
         chmod +x start_scanner.sh
     fi

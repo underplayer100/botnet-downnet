@@ -28,15 +28,19 @@ import (
     ctx, cancel = context.WithCancel(context.Background())
     startTime = time.Now()
     
-    // Client HTTP réutilisable pour de meilleures performances
+    // Limiter le nombre de goroutines simultanées pour éviter de saturer le CPU/RAM
+    maxGoroutines = 200
+    sem = make(chan struct{}, maxGoroutines)
+    
+    // Client HTTP réutilisable
     httpClient = &http.Client{
         Transport: &http.Transport{
             TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-            IdleConnTimeout: 30 * time.Second,
-            MaxIdleConns: 1000,
-            MaxIdleConnsPerHost: 100,
+            IdleConnTimeout: 15 * time.Second,
+            MaxIdleConns: 500,
+            MaxIdleConnsPerHost: 50,
         },
-        Timeout: 10 * time.Second,
+        Timeout: 5 * time.Second,
     }
 )
 
